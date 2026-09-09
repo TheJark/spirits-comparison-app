@@ -1,0 +1,40 @@
+substitutions:
+  _REGION: us-central1
+  _REPO: spirits-comparison-app          # Artifact Registry repo name
+  _SERVICE: spirits-comparison-app       # Cloud Run service name
+  _RUNTIME_SA: cloud-run-bq-reader@${PROJECT_ID}.iam.gserviceaccount.com
+
+steps:
+  # Build the image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - build
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${SHORT_SHA}'
+      - '.'
+
+  # Push it to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - push
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${SHORT_SHA}'
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - '${_SERVICE}'
+      - '--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${SHORT_SHA}'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--service-account=${_RUNTIME_SA}'
+      - '--allow-unauthenticated'      # drop this flag if the dashboard should require IAM/IAP auth instead
+      - '--quiet'
+
+images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO}/${_SERVICE}:${SHORT_SHA}'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
