@@ -1,0 +1,444 @@
+/* Design tokens follow the validated dataviz reference palette
+   (chart chrome & ink table) so the app and its charts share one system. */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --surface-raised: #ffffff;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --gridline: #e1e0d9;
+  --baseline-axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.1);
+  --border-strong: rgba(11, 11, 11, 0.16);
+  --good: #0ca30c;
+  --critical: #d03b3b;
+
+  --series-baseline: #2a78d6;
+  --series-cutwater: #eb6834;
+  --series-luxardo: #1baf7a;
+  --series-appleton: #eda100;
+  --series-uncle_nearest: #e87ba4;
+
+  --seq-100: #cde2fb;
+  --seq-250: #9ec5f4;
+  --seq-400: #5598e7;
+  --seq-450: #2a78d6;
+  --seq-600: #184f95;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --surface-raised: #212120;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --gridline: #2c2c2a;
+    --baseline-axis: #383835;
+    --border: rgba(255, 255, 255, 0.1);
+    --border-strong: rgba(255, 255, 255, 0.18);
+    --good: #0ca30c;
+    --critical: #e66767;
+
+    --series-baseline: #3987e5;
+    --series-cutwater: #d95926;
+    --series-luxardo: #199e70;
+    --series-appleton: #c98500;
+    --series-uncle_nearest: #d55181;
+
+    --seq-100: #1c355c;
+    --seq-250: #184f95;
+    --seq-400: #1c5cab;
+    --seq-450: #3987e5;
+    --seq-600: #86b6ef;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+}
+
+body {
+  background: var(--page);
+  color: var(--text-primary);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.dashboard {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 28px 20px 64px;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Header + controls                                                      */
+/* ---------------------------------------------------------------------- */
+
+.dashboard-header h1 {
+  font-size: 1.7rem;
+  font-weight: 650;
+  margin: 0 0 4px;
+  letter-spacing: -0.01em;
+}
+
+.dashboard-header p {
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  margin: 0;
+  max-width: 68ch;
+}
+
+.mock-banner {
+  margin-top: 14px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--series-appleton) 14%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--series-appleton) 40%, var(--border));
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.controls-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: flex-end;
+  margin: 24px 0;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.control-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 200px;
+}
+
+.control-field label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.control-field select {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-raised);
+  color: var(--text-primary);
+}
+
+.target-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.target-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 6px 8px;
+  border-radius: 999px;
+  border: 1.5px solid var(--chip-color, var(--border-strong));
+  background: var(--surface-raised);
+  font-size: 0.84rem;
+  font-weight: 550;
+  color: var(--text-primary);
+  cursor: pointer;
+  opacity: 0.45;
+  transition: opacity 0.12s ease;
+}
+
+.target-chip.active {
+  opacity: 1;
+  background: color-mix(in srgb, var(--chip-color) 12%, var(--surface-raised));
+}
+
+.target-chip .swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--chip-color);
+  flex: none;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Stat tiles                                                             */
+/* ---------------------------------------------------------------------- */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.stat-tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--tile-color, var(--baseline-axis));
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.stat-tile .stat-label {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.stat-tile .stat-value {
+  font-size: 1.5rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.stat-tile .stat-sub {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Tabs                                                                   */
+/* ---------------------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 22px;
+}
+
+.tab-btn {
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 550;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 9px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab-btn:hover {
+  color: var(--text-primary);
+}
+
+.tab-btn.active {
+  color: var(--text-primary);
+  border-bottom-color: var(--series-baseline);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Cards / sections                                                       */
+/* ---------------------------------------------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-bottom: 20px;
+}
+
+.card-title {
+  font-size: 1.02rem;
+  font-weight: 620;
+  margin: 0 0 2px;
+}
+
+.card-desc {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  margin: 0 0 14px;
+}
+
+.card-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Legend (shared by charts)                                              */
+/* ---------------------------------------------------------------------- */
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.chart-legend .legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.chart-legend .legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Similarity heatmap                                                     */
+/* ---------------------------------------------------------------------- */
+
+.heatmap-scroll {
+  overflow-x: auto;
+}
+
+.heatmap {
+  display: grid;
+  border-collapse: collapse;
+  min-width: 560px;
+}
+
+.heatmap-header-cell,
+.heatmap-row-label,
+.heatmap-cell {
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  border-bottom: 1px solid var(--gridline);
+}
+
+.heatmap-header-cell {
+  color: var(--text-muted);
+  font-weight: 600;
+  text-align: center;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.heatmap-row-label {
+  color: var(--text-primary);
+  font-weight: 550;
+}
+
+.heatmap-row-label .row-desc {
+  display: block;
+  font-weight: 400;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.heatmap-cell {
+  text-align: center;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-weight: 600;
+  border-left: 2px solid var(--surface);
+  border-right: 2px solid var(--surface);
+}
+
+.heatmap-cell:hover {
+  outline: 2px solid var(--series-baseline);
+  outline-offset: -2px;
+}
+
+.heatmap-cell.heat-0 { background: var(--seq-100); color: var(--text-primary); }
+.heatmap-cell.heat-1 { background: var(--seq-250); color: var(--text-primary); }
+.heatmap-cell.heat-2 { background: var(--seq-400); color: #ffffff; }
+.heatmap-cell.heat-3 { background: var(--seq-450); color: #ffffff; }
+.heatmap-cell.heat-4 { background: var(--seq-600); color: #ffffff; }
+.heatmap-cell.heat-null {
+  background: transparent;
+  color: var(--text-muted);
+  cursor: default;
+}
+.heatmap-cell.heat-null:hover {
+  outline: none;
+}
+
+.heatmap-cell .cell-value {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Misc                                                                   */
+/* ---------------------------------------------------------------------- */
+
+.empty-state {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  padding: 24px 0;
+  text-align: center;
+}
+
+.loading-state,
+.error-state {
+  max-width: 720px;
+  margin: 80px auto;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
+.error-state {
+  color: var(--critical);
+}
+
+.recharts-tooltip-wrapper {
+  outline: none;
+}
+
+.rc-tooltip {
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.rc-tooltip .rc-tooltip-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+}
+
+.rc-tooltip .rc-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+
+.rc-tooltip .rc-tooltip-row .swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex: none;
+}
