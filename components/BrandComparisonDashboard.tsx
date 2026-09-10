@@ -145,10 +145,10 @@ export default function BrandComparisonDashboard() {
   return (
     <div className="dashboard">
       <header className="dashboard-header">
-        <h1>Customer Comparison Dashboard</h1>
+        <h1>M&A Consumer Fit Report</h1>
         <p>
           {baselineName} customers vs. each M&amp;A target brand&apos;s customers, indexed against
-          the full audience and grouped by logical attribute area.
+          the full audience.
         </p>
         {source === 'mock' && (
           <div className="mock-banner">
