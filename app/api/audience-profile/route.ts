@@ -19,6 +19,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { BigQuery } from '@google-cloud/bigquery';
 
+export const dynamic = 'force-dynamic';
+
 const bigquery = new BigQuery();
 
 export interface ProfileRow {
