@@ -17,7 +17,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { ALL_GROUPS, groupFor } from '@/lib/attributeGroups';
-import { computeDifferentiators } from '@/lib/differentiators';
+import { computeDifferentiators, computeGroupedDifferentiators } from '@/lib/differentiators';
 import { MIN_SAMPLE, ProfileRow, TARGET_SEGMENT_KEYS } from '@/lib/profileTypes';
 import { colorForSegment } from '@/lib/segmentPalette';
 import { computeGroupSimilarity, fitScore } from '@/lib/similarity';
@@ -279,7 +279,7 @@ function GroupPanel({
   const effectiveField = selectedField && fieldNames.has(selectedField) ? selectedField : attributeOptions[0]?.field_name ?? null;
 
   const differentiators = useMemo(
-    () => computeDifferentiators(rows, baselineKey, targets.map((t) => t.key), { fieldNames, limit: 8 }),
+    () => computeGroupedDifferentiators(rows, baselineKey, targets.map((t) => t.key), { fieldNames, topAttributes: 6 }),
     [rows, baselineKey, targets, fieldNames]
   );
 
@@ -289,7 +289,13 @@ function GroupPanel({
         <div className="card-title">{group?.label ?? groupKey}</div>
         <p className="card-desc">{group?.description}</p>
         <div className="card-header-row" />
-        <h3 style={{ fontSize: '0.9rem', fontWeight: 600, margin: '4px 0 10px' }}>Top differentiators in this group</h3>
+        <h3 style={{ fontSize: '0.9rem', fontWeight: 600, margin: '4px 0 2px' }}>Top differentiators in this group</h3>
+        <p className="card-desc">
+          {(() => {
+            const n = new Set(differentiators.map((d) => d.field_name)).size;
+            return `The ${n} attribute${n === 1 ? '' : 's'} with the biggest gap vs. ${baselineName}, each shown in full so the whole distribution reads together.`;
+          })()}
+        </p>
         <DifferentiatorChart entries={differentiators} targets={targets} />
       </section>
 
