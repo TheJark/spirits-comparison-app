@@ -18,29 +18,14 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { BigQuery } from '@google-cloud/bigquery';
+import { ProfileRow } from '@/lib/profileTypes';
+import { generateMockProfileRows } from '@/lib/mockProfileData';
 
 export const dynamic = 'force-dynamic';
 
 const bigquery = new BigQuery();
 
-export interface ProfileRow {
-  segment_key: string;
-  segment_name: string;
-  segment_role: 'baseline' | 'target';
-  segment_size: number;
-  category: string;
-  field_name: string;
-  attribute_label: string;
-  field_value: string;
-  value_label: string;
-  segment_count: number;
-  segment_field_respondents: number;
-  segment_pct: number;
-  population_count: number;
-  pop_field_respondents: number;
-  population_pct: number;
-  index_vs_population: number;
-}
+export type { ProfileRow };
 
 const PROFILE_QUERY = `
   SELECT
@@ -55,8 +40,17 @@ const PROFILE_QUERY = `
 export async function GET(_req: NextRequest) {
   try {
     const [rows] = await bigquery.query({ query: PROFILE_QUERY });
-    return NextResponse.json({ rows: rows as ProfileRow[] });
+    return NextResponse.json({ rows: rows as ProfileRow[], source: 'bigquery' });
   } catch (err) {
+    // Outside production (no BigQuery credentials in this environment,
+    // running `next dev` locally, etc.) fall back to a realistic mock
+    // fixture so the dashboard is still buildable/previewable. Production
+    // keeps failing loudly -- a broken BigQuery connection there is a real
+    // incident, not something to paper over with fake data.
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn('audience-profile: BigQuery query failed, serving mock data instead', err);
+      return NextResponse.json({ rows: generateMockProfileRows(), source: 'mock' });
+    }
     console.error('audience-profile query failed', err);
     return NextResponse.json(
       { error: 'Failed to load audience profile data' },

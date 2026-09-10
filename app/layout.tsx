@@ -1,3 +1,5 @@
+import './globals.css';
+
 export const metadata = {
   title: 'Customer Comparison Profile',
   description: 'Baseline vs. M&A target brand audience comparison',

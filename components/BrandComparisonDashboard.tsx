@@ -2,56 +2,51 @@
 
 // components/BrandComparisonDashboard.tsx
 //
-// Compares one BASELINE segment (your owned-brand customers, or the combined
-// portfolio) against one TARGET segment (an M&A candidate's customers) across
-// every characteristic attribute in the audience profile.
+// Dashboard-style view of the Customer Comparison Profile: one baseline
+// (owned-brand) segment against all four M&A target brands at once,
+// organized into the logical attribute groups defined in
+// lib/attributeGroups.ts. An Overview tab leads with a group x target
+// similarity heatmap and the biggest differentiators overall; each group
+// tab drills into that group's own differentiators plus a full
+// attribute-level breakdown.
 //
-// Data source: GET /api/audience-profile (see 03_api_route.ts), which returns
-// { rows: ProfileRow[] } shaped by 01_segment_comparison_profile.sql.
-//
-// npm install recharts
+// Data source: GET /api/audience-profile, which queries
+// yg_segment_profile in production and falls back to a realistic mock
+// fixture outside production (see lib/mockProfileData.ts) so this is
+// previewable without BigQuery credentials.
 
 import { useEffect, useMemo, useState } from 'react';
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, ReferenceLine,
-} from 'recharts';
+import { ALL_GROUPS, groupFor } from '@/lib/attributeGroups';
+import { computeDifferentiators } from '@/lib/differentiators';
+import { MIN_SAMPLE, ProfileRow, TARGET_SEGMENT_KEYS } from '@/lib/profileTypes';
+import { colorForSegment } from '@/lib/segmentPalette';
+import { computeGroupSimilarity, fitScore } from '@/lib/similarity';
+import AttributeDrilldown from '@/components/dashboard/AttributeDrilldown';
+import DifferentiatorChart from '@/components/dashboard/DifferentiatorChart';
+import SegmentControls from '@/components/dashboard/SegmentControls';
+import SimilarityHeatmap from '@/components/dashboard/SimilarityHeatmap';
+import StatTile from '@/components/dashboard/StatTile';
 
-interface ProfileRow {
+interface SegmentOption {
   segment_key: string;
   segment_name: string;
-  segment_role: 'baseline' | 'target';
   segment_size: number;
-  category: string;
-  field_name: string;
-  attribute_label: string;
-  field_value: string;
-  value_label: string;
-  segment_count: number;
-  segment_field_respondents: number;
-  segment_pct: number;
-  population_count: number;
-  pop_field_respondents: number;
-  population_pct: number;
-  index_vs_population: number;
 }
 
-const MIN_SAMPLE = 30;
-
-// Characteristic field_names aren't pre-grouped into topics -- this is a
-// light heuristic so ~500 attributes are browsable instead of one flat list.
-// Adjust the keyword buckets to taste as you learn the field list.
-function bucketFor(fieldName: string): string {
-  const f = fieldName.toLowerCase();
-  if (/(gross_personal|disposable_income|educ|employee_status|hhsize|household_type|race|gender|age|urbancity|region|family_life_cycle|omni_generation)/.test(f)) return 'Demographics';
-  if (/(alc_|alcohol|drink|wine|beer|spirits|liquor)/.test(f)) return 'Alcohol Behavior & Spend';
-  if (/(leisure|interests|life_events|travel|vac_|me_time|relax)/.test(f)) return 'Lifestyle & Interests';
-  if (/(internet|isp|playvgs|vghours|browsing)/.test(f)) return 'Media & Digital';
-  return 'Other';
+function uniqueSegments(rows: ProfileRow[] | null, role: 'baseline' | 'target'): SegmentOption[] {
+  if (!rows) return [];
+  const map = new Map<string, SegmentOption>();
+  rows.forEach((r) => {
+    if (r.segment_role === role) {
+      map.set(r.segment_key, { segment_key: r.segment_key, segment_name: r.segment_name, segment_size: r.segment_size });
+    }
+  });
+  return Array.from(map.values());
 }
 
 function useProfileData() {
   const [rows, setRows] = useState<ProfileRow[] | null>(null);
+  const [source, setSource] = useState<'bigquery' | 'mock' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -59,236 +54,257 @@ function useProfileData() {
       .then((r) => r.json())
       .then((json) => {
         if (json.error) setError(json.error);
-        else setRows(json.rows);
+        else {
+          setRows(json.rows);
+          setSource(json.source ?? null);
+        }
       })
       .catch((e) => setError(String(e)));
   }, []);
 
-  return { rows, error };
+  return { rows, source, error };
 }
 
 export default function BrandComparisonDashboard() {
-  const { rows, error } = useProfileData();
+  const { rows, source, error } = useProfileData();
 
-  const baselineOptions = useMemo(
-    () => uniqueSegments(rows, 'baseline'),
-    [rows]
-  );
-  const targetOptions = useMemo(
-    () => uniqueSegments(rows, 'target'),
-    [rows]
-  );
+  const baselineOptions = useMemo(() => uniqueSegments(rows, 'baseline'), [rows]);
+  const targetOptions = useMemo(() => uniqueSegments(rows, 'target'), [rows]);
 
   const [baselineKey, setBaselineKey] = useState('portfolio_total');
-  const [targetKey, setTargetKey] = useState<string | null>(null);
-  const [bucket, setBucket] = useState<string>('All');
-  const [attributeField, setAttributeField] = useState<string | null>(null);
+  const [activeTargets, setActiveTargets] = useState<Set<string>>(new Set());
+  const [activeTab, setActiveTab] = useState('overview');
+  const [selectedFieldByGroup, setSelectedFieldByGroup] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    if (!targetKey && targetOptions.length) setTargetKey(targetOptions[0].segment_key);
-  }, [targetOptions, targetKey]);
+    if (activeTargets.size === 0 && targetOptions.length) {
+      setActiveTargets(new Set(targetOptions.map((o) => o.segment_key)));
+    }
+  }, [targetOptions, activeTargets.size]);
 
-  const baselineSize = rows?.find((r) => r.segment_key === baselineKey)?.segment_size;
-  const targetSize = rows?.find((r) => r.segment_key === targetKey)?.segment_size;
+  const allTargetMeta = useMemo(
+    () => TARGET_SEGMENT_KEYS
+      .map((key) => targetOptions.find((o) => o.segment_key === key))
+      .filter((o): o is SegmentOption => !!o)
+      .map((o) => ({ key: o.segment_key, name: o.segment_name })),
+    [targetOptions]
+  );
+  const activeTargetMeta = useMemo(
+    () => allTargetMeta.filter((t) => activeTargets.has(t.key)),
+    [allTargetMeta, activeTargets]
+  );
 
-  const attributeOptions = useMemo(() => {
-    if (!rows) return [];
-    const seen = new Map<string, string>();
-    rows.forEach((r) => {
-      if (bucket === 'All' || bucketFor(r.field_name) === bucket) {
-        seen.set(r.field_name, r.attribute_label);
-      }
+  const baselineName = baselineOptions.find((o) => o.segment_key === baselineKey)?.segment_name ?? 'Baseline';
+  const baselineSize = baselineOptions.find((o) => o.segment_key === baselineKey)?.segment_size;
+
+  // groupFor() is evaluated across every row once so we know which of the
+  // 12 defined groups (+ "Other") actually have data, and can hand each
+  // group tab only the field_names that belong to it.
+  const fieldNamesByGroup = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    (rows ?? []).forEach((r) => {
+      const g = groupFor(r.field_name);
+      if (!map.has(g.key)) map.set(g.key, new Set());
+      map.get(g.key)!.add(r.field_name);
     });
-    return Array.from(seen.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  }, [rows, bucket]);
+    return map;
+  }, [rows]);
 
-  // Top differentiators: biggest percentage-point gaps between target and
-  // baseline, restricted to cells with enough sample in both segments.
-  const topDifferentiators = useMemo(() => {
-    if (!rows || !targetKey) return [];
-    const baselineMap = new Map<string, ProfileRow>();
-    rows
-      .filter((r) => r.segment_key === baselineKey && r.segment_field_respondents >= MIN_SAMPLE)
-      .forEach((r) => baselineMap.set(`${r.field_name}::${r.field_value}`, r));
+  const visibleGroups = useMemo(
+    () => ALL_GROUPS.filter((g) => fieldNamesByGroup.has(g.key)),
+    [fieldNamesByGroup]
+  );
 
-    return rows
-      .filter((r) => r.segment_key === targetKey && r.segment_field_respondents >= MIN_SAMPLE)
-      .map((t) => {
-        const b = baselineMap.get(`${t.field_name}::${t.field_value}`);
-        if (!b) return null;
-        return {
-          attribute_label: t.attribute_label,
-          value_label: t.value_label,
-          category_bucket: bucketFor(t.field_name),
-          baseline_pct: b.segment_pct,
-          target_pct: t.segment_pct,
-          gap: Math.round((t.segment_pct - b.segment_pct) * 10) / 10,
-        };
-      })
-      .filter((x): x is NonNullable<typeof x> => x !== null)
-      .sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap))
-      .slice(0, 12);
-  }, [rows, baselineKey, targetKey]);
+  const groupSimilarities = useMemo(
+    () => (rows ? computeGroupSimilarity(rows, baselineKey, [...TARGET_SEGMENT_KEYS]) : []),
+    [rows, baselineKey]
+  );
 
-  // Full value breakdown for the currently drilled-into attribute
-  const attributeDetail = useMemo(() => {
-    if (!rows || !attributeField || !targetKey) return [];
-    const values = new Set<string>();
-    rows.forEach((r) => {
-      if (r.field_name === attributeField && (r.segment_key === baselineKey || r.segment_key === targetKey)) {
-        values.add(r.value_label);
-      }
+  const overviewDifferentiators = useMemo(
+    () => (rows ? computeDifferentiators(rows, baselineKey, activeTargetMeta.map((t) => t.key), { limit: 14 }) : []),
+    [rows, baselineKey, activeTargetMeta]
+  );
+
+  function toggleTarget(key: string) {
+    setActiveTargets((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
     });
-    return Array.from(values).map((value_label) => {
-      const b = rows.find((r) => r.field_name === attributeField && r.segment_key === baselineKey && r.value_label === value_label);
-      const t = rows.find((r) => r.field_name === attributeField && r.segment_key === targetKey && r.value_label === value_label);
-      return {
-        value_label,
-        [baselineLabel(rows, baselineKey)]: b?.segment_pct ?? 0,
-        [targetLabel(rows, targetKey)]: t?.segment_pct ?? 0,
-      };
-    });
-  }, [rows, attributeField, baselineKey, targetKey]);
+  }
 
-  if (error) return <div className="text-red-600 p-4">Failed to load profile data: {error}</div>;
-  if (!rows) return <div className="p-4 text-gray-500">Loading audience profile…</div>;
+  function jumpToGroup(groupKey: string, targetKey: string) {
+    setActiveTargets((prev) => (prev.has(targetKey) ? prev : new Set(prev).add(targetKey)));
+    setActiveTab(groupKey);
+  }
+
+  if (error) return <div className="error-state">Failed to load profile data: {error}</div>;
+  if (!rows) return <div className="loading-state">Loading audience profile…</div>;
 
   return (
-    <div className="max-w-5xl mx-auto p-6 space-y-8">
-      <header>
-        <h1 className="text-2xl font-semibold">Customer Comparison Profile</h1>
-        <p className="text-gray-500 text-sm mt-1">
-          Baseline (owned-brand) customers vs. an M&amp;A target brand's customers, indexed against the full audience.
+    <div className="dashboard">
+      <header className="dashboard-header">
+        <h1>Customer Comparison Dashboard</h1>
+        <p>
+          {baselineName} customers vs. each M&amp;A target brand&apos;s customers, indexed against
+          the full audience and grouped by logical attribute area.
         </p>
+        {source === 'mock' && (
+          <div className="mock-banner">
+            Showing sample data — the BigQuery connection isn&apos;t available in this environment.
+          </div>
+        )}
       </header>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Selector
-          label="Baseline segment"
-          value={baselineKey}
-          onChange={setBaselineKey}
-          options={baselineOptions.map((o) => ({ value: o.segment_key, label: `${o.segment_name} (n=${o.segment_size.toLocaleString()})` }))}
-        />
-        <Selector
-          label="M&A target segment"
-          value={targetKey ?? ''}
-          onChange={setTargetKey}
-          options={targetOptions.map((o) => ({ value: o.segment_key, label: `${o.segment_name} (n=${o.segment_size.toLocaleString()})` }))}
-        />
-      </div>
+      <SegmentControls
+        baselineOptions={baselineOptions}
+        baselineKey={baselineKey}
+        onBaselineChange={setBaselineKey}
+        targetOptions={targetOptions}
+        activeTargets={activeTargets}
+        onToggleTarget={toggleTarget}
+      />
 
-      <div className="flex gap-4 text-sm">
-        {baselineSize != null && <SegmentSizeCard label="Baseline customers" value={baselineSize} />}
-        {targetSize != null && <SegmentSizeCard label="Target customers" value={targetSize} />}
-      </div>
-
-      <section>
-        <h2 className="text-lg font-medium mb-3">Where these customers differ most</h2>
-        <p className="text-sm text-gray-500 mb-4">
-          Ranked by percentage-point gap vs. baseline, restricted to attributes with at least {MIN_SAMPLE} respondents in both segments.
-        </p>
-        <div className="space-y-2">
-          {topDifferentiators.map((d, i) => (
-            <div key={i} className="flex items-center justify-between border-b border-gray-100 py-2 text-sm">
-              <div>
-                <div className="font-medium">{d.attribute_label}</div>
-                <div className="text-gray-500">{d.value_label} · {d.category_bucket}</div>
-              </div>
-              <div className="text-right">
-                <div className={d.gap > 0 ? 'text-emerald-600 font-semibold' : 'text-rose-600 font-semibold'}>
-                  {d.gap > 0 ? '+' : ''}{d.gap} pts
-                </div>
-                <div className="text-gray-400 text-xs">{d.baseline_pct}% → {d.target_pct}%</div>
-              </div>
-            </div>
-          ))}
-          {topDifferentiators.length === 0 && (
-            <div className="text-gray-400 text-sm">No overlapping attributes met the sample-size threshold yet.</div>
-          )}
-        </div>
-      </section>
-
-      <section>
-        <h2 className="text-lg font-medium mb-3">Drill into an attribute</h2>
-        <div className="flex gap-3 mb-4">
-          <Selector
-            label="Category"
-            value={bucket}
-            onChange={setBucket}
-            options={['All', 'Demographics', 'Alcohol Behavior & Spend', 'Lifestyle & Interests', 'Media & Digital', 'Other'].map((b) => ({ value: b, label: b }))}
-          />
-          <Selector
-            label="Attribute"
-            value={attributeField ?? ''}
-            onChange={setAttributeField}
-            options={attributeOptions.map(([field_name, label]) => ({ value: field_name, label }))}
-          />
-        </div>
-
-        {attributeField && attributeDetail.length > 0 && (
-          <ResponsiveContainer width="100%" height={Math.max(220, attributeDetail.length * 40)}>
-            <BarChart data={attributeDetail} layout="vertical" margin={{ left: 24 }}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis type="number" unit="%" />
-              <YAxis type="category" dataKey="value_label" width={180} />
-              <Tooltip />
-              <Legend />
-              <ReferenceLine x={0} stroke="#ccc" />
-              <Bar dataKey={baselineLabel(rows, baselineKey)} fill="#94a3b8" />
-              <Bar dataKey={targetLabel(rows, targetKey)} fill="#2563eb" />
-            </BarChart>
-          </ResponsiveContainer>
+      <div className="stat-grid">
+        {baselineSize != null && (
+          <StatTile label={`${baselineName} customers`} value={baselineSize.toLocaleString()} color="var(--series-baseline)" />
         )}
-      </section>
-    </div>
-  );
-}
+        {activeTargetMeta.map((t) => {
+          const score = fitScore(groupSimilarities, t.key);
+          const size = targetOptions.find((o) => o.segment_key === t.key)?.segment_size;
+          return (
+            <StatTile
+              key={t.key}
+              label={`${t.name} fit score`}
+              value={score != null ? `${score}` : '—'}
+              sub={size != null ? `n=${size.toLocaleString()} customers` : undefined}
+              color={colorForSegment(t.key, 'target').light}
+            />
+          );
+        })}
+      </div>
 
-function uniqueSegments(rows: ProfileRow[] | null, role: 'baseline' | 'target') {
-  if (!rows) return [];
-  const map = new Map<string, { segment_key: string; segment_name: string; segment_size: number }>();
-  rows.forEach((r) => {
-    if (r.segment_role === role) map.set(r.segment_key, { segment_key: r.segment_key, segment_name: r.segment_name, segment_size: r.segment_size });
-  });
-  return Array.from(map.values());
-}
-
-function baselineLabel(rows: ProfileRow[], key: string) {
-  return rows.find((r) => r.segment_key === key)?.segment_name ?? 'Baseline';
-}
-function targetLabel(rows: ProfileRow[], key: string | null) {
-  return rows.find((r) => r.segment_key === key)?.segment_name ?? 'Target';
-}
-
-function SegmentSizeCard({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg border border-gray-200 px-4 py-2">
-      <div className="text-gray-500">{label}</div>
-      <div className="text-xl font-semibold">{value.toLocaleString()}</div>
-    </div>
-  );
-}
-
-function Selector({
-  label, value, onChange, options,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-}) {
-  return (
-    <label className="text-sm flex-1">
-      <span className="block text-gray-500 mb-1">{label}</span>
-      <select
-        className="w-full border border-gray-300 rounded-md px-2 py-1.5"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
+      <div className="tabs">
+        <button
+          type="button"
+          className={`tab-btn${activeTab === 'overview' ? ' active' : ''}`}
+          onClick={() => setActiveTab('overview')}
+        >
+          Overview
+        </button>
+        {visibleGroups.map((g) => (
+          <button
+            key={g.key}
+            type="button"
+            className={`tab-btn${activeTab === g.key ? ' active' : ''}`}
+            onClick={() => setActiveTab(g.key)}
+          >
+            {g.label}
+          </button>
         ))}
-      </select>
-    </label>
+      </div>
+
+      {activeTab === 'overview' ? (
+        <>
+          <section className="card">
+            <div className="card-title">Where each target is similar or different, by group</div>
+            <p className="card-desc">
+              Average percentage-point spread vs. {baselineName} within each attribute group.
+            </p>
+            <SimilarityHeatmap groups={groupSimilarities} targets={activeTargetMeta} onSelect={jumpToGroup} />
+          </section>
+
+          <section className="card">
+            <div className="card-title">Biggest differentiators overall</div>
+            <p className="card-desc">
+              Ranked by the largest percentage-point gap vs. {baselineName} across any active target,
+              restricted to cells with at least {MIN_SAMPLE} respondents in both segments.
+            </p>
+            <DifferentiatorChart entries={overviewDifferentiators} targets={activeTargetMeta} showGroupLabel />
+          </section>
+        </>
+      ) : (
+        <GroupPanel
+          groupKey={activeTab}
+          rows={rows}
+          baselineKey={baselineKey}
+          baselineName={baselineName}
+          targets={activeTargetMeta}
+          selectedField={selectedFieldByGroup[activeTab] ?? null}
+          onSelectField={(fieldName) => setSelectedFieldByGroup((prev) => ({ ...prev, [activeTab]: fieldName }))}
+        />
+      )}
+    </div>
+  );
+}
+
+function GroupPanel({
+  groupKey,
+  rows,
+  baselineKey,
+  baselineName,
+  targets,
+  selectedField,
+  onSelectField,
+}: {
+  groupKey: string;
+  rows: ProfileRow[];
+  baselineKey: string;
+  baselineName: string;
+  targets: { key: string; name: string }[];
+  selectedField: string | null;
+  onSelectField: (fieldName: string) => void;
+}) {
+  const group = ALL_GROUPS.find((g) => g.key === groupKey);
+
+  const fieldNames = useMemo(() => {
+    const set = new Set<string>();
+    rows.forEach((r) => {
+      if (groupFor(r.field_name).key === groupKey) set.add(r.field_name);
+    });
+    return set;
+  }, [rows, groupKey]);
+
+  const attributeOptions = useMemo(() => {
+    const seen = new Map<string, string>();
+    rows.forEach((r) => {
+      if (fieldNames.has(r.field_name)) seen.set(r.field_name, r.attribute_label);
+    });
+    return Array.from(seen.entries())
+      .map(([field_name, attribute_label]) => ({ field_name, attribute_label }))
+      .sort((a, b) => a.attribute_label.localeCompare(b.attribute_label));
+  }, [rows, fieldNames]);
+
+  const effectiveField = selectedField && fieldNames.has(selectedField) ? selectedField : attributeOptions[0]?.field_name ?? null;
+
+  const differentiators = useMemo(
+    () => computeDifferentiators(rows, baselineKey, targets.map((t) => t.key), { fieldNames, limit: 8 }),
+    [rows, baselineKey, targets, fieldNames]
+  );
+
+  return (
+    <>
+      <section className="card">
+        <div className="card-title">{group?.label ?? groupKey}</div>
+        <p className="card-desc">{group?.description}</p>
+        <div className="card-header-row" />
+        <h3 style={{ fontSize: '0.9rem', fontWeight: 600, margin: '4px 0 10px' }}>Top differentiators in this group</h3>
+        <DifferentiatorChart entries={differentiators} targets={targets} />
+      </section>
+
+      <section className="card">
+        <h3 style={{ fontSize: '0.9rem', fontWeight: 600, margin: '0 0 10px' }}>Full attribute breakdown</h3>
+        <AttributeDrilldown
+          rows={rows}
+          attributeOptions={attributeOptions}
+          selectedField={effectiveField}
+          onSelectField={onSelectField}
+          baselineKey={baselineKey}
+          baselineName={baselineName}
+          targets={targets}
+        />
+      </section>
+    </>
   );
 }
